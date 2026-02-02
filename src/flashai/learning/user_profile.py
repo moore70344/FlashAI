@@ -392,3 +392,180 @@ class UserProfileManager:
         profile = UserProfile.from_dict(profile_data)
         await self.save_profile(profile)
         return profile
+
+    # History management methods
+    async def get_interaction_history(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        interaction_type: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get interaction history for a user."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return []
+
+        interactions = profile.interactions
+
+        # Filter by type if specified
+        if interaction_type:
+            interactions = [i for i in interactions if i.interaction_type == interaction_type]
+
+        # Apply pagination
+        interactions = interactions[offset:offset + limit]
+
+        return [
+            {
+                "timestamp": i.timestamp,
+                "type": i.interaction_type,
+                "query": i.query,
+                "result": i.result_summary,
+                "energy": i.metadata.get("energy"),
+                "confidence": i.metadata.get("confidence"),
+                "feedback": i.feedback,
+            }
+            for i in interactions
+        ]
+
+    async def clear_history(self, user_id: str) -> None:
+        """Clear interaction history for a user."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return
+
+        profile.interactions = []
+        await self.save_profile(profile)
+        logger.info(f"Cleared history for user: {user_id[:8]}...")
+
+    # Settings management methods
+    async def update_settings(self, user_id: str, settings: dict[str, Any]) -> None:
+        """Update user settings."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return
+
+        profile.settings.update(settings)
+        await self.save_profile(profile)
+        logger.info(f"Updated settings for user: {user_id[:8]}...")
+
+    async def get_settings(self, user_id: str) -> dict[str, Any]:
+        """Get user settings."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return {}
+        return profile.settings
+
+    # Notes management methods
+    async def get_notes(
+        self,
+        user_id: str,
+        tag: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get notes for a user, optionally filtered by tag."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return []
+
+        notes = profile.metadata.get("notes", [])
+
+        if tag:
+            notes = [n for n in notes if tag in n.get("tags", [])]
+
+        return notes
+
+    async def create_note(
+        self,
+        user_id: str,
+        content: str,
+        title: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        """Create a new note."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            raise ValueError(f"Profile not found for user: {user_id}")
+
+        if "notes" not in profile.metadata:
+            profile.metadata["notes"] = []
+
+        note = {
+            "note_id": hashlib.md5(f"{user_id}{datetime.utcnow().isoformat()}".encode()).hexdigest()[:12],
+            "title": title or "Untitled",
+            "content": content,
+            "tags": tags or [],
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        profile.metadata["notes"].append(note)
+        await self.save_profile(profile)
+
+        logger.info(f"Created note for user: {user_id[:8]}...")
+        return note
+
+    async def update_note(
+        self,
+        user_id: str,
+        note_id: str,
+        content: Optional[str] = None,
+        title: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Update an existing note."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return None
+
+        notes = profile.metadata.get("notes", [])
+        for note in notes:
+            if note["note_id"] == note_id:
+                if content is not None:
+                    note["content"] = content
+                if title is not None:
+                    note["title"] = title
+                if tags is not None:
+                    note["tags"] = tags
+                note["updated_at"] = datetime.utcnow().isoformat()
+
+                await self.save_profile(profile)
+                return note
+
+        return None
+
+    async def delete_note(self, user_id: str, note_id: str) -> bool:
+        """Delete a note."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return False
+
+        notes = profile.metadata.get("notes", [])
+        original_len = len(notes)
+        notes = [n for n in notes if n["note_id"] != note_id]
+
+        if len(notes) == original_len:
+            return False
+
+        profile.metadata["notes"] = notes
+        await self.save_profile(profile)
+        logger.info(f"Deleted note {note_id} for user: {user_id[:8]}...")
+        return True
+
+    async def search_notes(
+        self,
+        user_id: str,
+        query: str,
+    ) -> list[dict[str, Any]]:
+        """Search notes by content or title."""
+        profile = await self.get_profile(user_id)
+        if profile is None:
+            return []
+
+        notes = profile.metadata.get("notes", [])
+        query_lower = query.lower()
+
+        return [
+            n for n in notes
+            if query_lower in n.get("content", "").lower()
+            or query_lower in n.get("title", "").lower()
+        ]

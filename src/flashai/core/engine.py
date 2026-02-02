@@ -18,6 +18,7 @@ from typing import Any, Optional, Callable
 from flashai.core.config import FlashAIConfig, load_config_from_env
 from flashai.models.ebm import EnergyBasedReasoningModel
 from flashai.learning.user_profile import UserProfileManager
+from flashai.learning.file_parser import LearningDataParser
 from flashai.state.manager import StateManager
 
 
@@ -330,6 +331,140 @@ class FlashAIEngine:
         })
 
         return learning_result
+
+    async def learn_from_file(
+        self,
+        file_path: Path | str,
+        feedback: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """
+        Learn from a data file.
+
+        Supports JSON, JSONL, CSV, YAML, Markdown, and text files.
+
+        Args:
+            file_path: Path to the learning data file.
+            feedback: Optional feedback on previous learning.
+
+        Returns:
+            Learning result with parsing and training info.
+        """
+        if not self._initialized:
+            raise RuntimeError("Engine not initialized. Call initialize() first.")
+
+        logger.info(f"Learning from file: {file_path}")
+
+        # Parse the file
+        parser = LearningDataParser()
+        parse_result = parser.parse_file(file_path)
+
+        if not parse_result.success:
+            return {
+                "status": "parse_error",
+                "errors": parse_result.errors,
+                "format_detected": parse_result.format_detected.value,
+            }
+
+        # Convert to learning data format
+        learning_data = parse_result.to_learning_data()
+
+        # Perform learning
+        learning_result = await self.learn(data=learning_data, feedback=feedback)
+
+        return {
+            "status": "learned",
+            "file": str(file_path),
+            "format": parse_result.format_detected.value,
+            "examples_parsed": len(parse_result.examples),
+            "parse_warnings": parse_result.warnings,
+            "learning_result": learning_result,
+        }
+
+    async def learn_from_screen(
+        self,
+        image_data: bytes,
+        context: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """
+        Learn from a screen capture image.
+
+        Extracts text and visual patterns from the image for learning.
+
+        Args:
+            image_data: Raw image bytes (PNG, JPEG, etc.)
+            context: Optional context about the screen capture.
+
+        Returns:
+            Learning result.
+        """
+        if not self._initialized:
+            raise RuntimeError("Engine not initialized. Call initialize() first.")
+
+        logger.info("Learning from screen capture...")
+
+        # Check if screen learning is enabled in user settings
+        if self._current_user_id:
+            profile = await self.user_manager.get_profile(self._current_user_id)
+            if profile and not profile.settings.get("screen_learning", False):
+                return {
+                    "status": "disabled",
+                    "message": "Screen learning is disabled in user settings.",
+                }
+
+        # Try to extract text from image using OCR (if available)
+        extracted_text = await self._extract_text_from_image(image_data)
+
+        if not extracted_text:
+            return {
+                "status": "no_content",
+                "message": "Could not extract content from image.",
+            }
+
+        # Create learning data from extracted text
+        learning_data = {
+            "examples": [],
+            "screen_content": extracted_text,
+            "context": context or {},
+            "source": "screen_capture",
+        }
+
+        # Record as note if enabled
+        if self._current_user_id:
+            await self.user_manager.create_note(
+                user_id=self._current_user_id,
+                content=extracted_text[:2000],
+                title=f"Screen capture - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                tags=["screen_capture", "auto_generated"],
+            )
+
+        # Update model with screen content
+        learning_result = await self.ebm_model.learn(learning_data, None)
+
+        return {
+            "status": "learned",
+            "extracted_text_length": len(extracted_text),
+            "learning_result": learning_result,
+        }
+
+    async def _extract_text_from_image(self, image_data: bytes) -> Optional[str]:
+        """Extract text from image using OCR."""
+        try:
+            # Try using pytesseract if available
+            import pytesseract
+            from PIL import Image
+            import io
+
+            image = Image.open(io.BytesIO(image_data))
+            text = pytesseract.image_to_string(image)
+            return text.strip() if text.strip() else None
+
+        except ImportError:
+            logger.warning("pytesseract not available for OCR")
+            # Return placeholder - in production, could use cloud OCR
+            return None
+        except Exception as e:
+            logger.error(f"OCR failed: {e}")
+            return None
 
     async def save_and_reset(
         self,

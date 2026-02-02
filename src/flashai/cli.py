@@ -347,6 +347,125 @@ def config(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--preview", is_flag=True, help="Preview without applying")
+@click.option("--format", "file_format", type=str, help="Force file format (json, csv, yaml, txt, md)")
+@click.pass_context
+def learn(ctx: click.Context, file_path: str, preview: bool, file_format: Optional[str]) -> None:
+    """Learn from a data file."""
+    from flashai.core.engine import FlashAIEngine
+    from flashai.learning.file_parser import LearningDataParser, FileFormat
+
+    base_path = ctx.obj["base_path"]
+    file_path = Path(file_path)
+
+    # Parse the file
+    parser = LearningDataParser()
+
+    format_hint = None
+    if file_format:
+        format_map = {
+            "json": FileFormat.JSON,
+            "jsonl": FileFormat.JSONL,
+            "csv": FileFormat.CSV,
+            "yaml": FileFormat.YAML,
+            "txt": FileFormat.TXT,
+            "md": FileFormat.MARKDOWN,
+        }
+        format_hint = format_map.get(file_format.lower())
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Parsing file...", total=None)
+
+        if format_hint:
+            content = file_path.read_text()
+            result = parser.parse_content(content, filename=file_path.name, format_hint=format_hint)
+        else:
+            result = parser.parse_file(file_path)
+
+    if not result.success:
+        console.print(Panel(
+            f"[bold red]Failed to parse file[/bold red]\n\n"
+            f"Errors: {', '.join(result.errors)}",
+            title="Parse Error",
+        ))
+        return
+
+    # Show preview
+    console.print(Panel(
+        f"[bold]File:[/bold] {file_path.name}\n"
+        f"[bold]Format:[/bold] {result.format_detected.value}\n"
+        f"[bold]Examples found:[/bold] {len(result.examples)}\n"
+        f"[bold]Warnings:[/bold] {len(result.warnings)}",
+        title="Parse Result",
+    ))
+
+    if result.examples:
+        table = Table(title="Examples Preview (first 5)")
+        table.add_column("Query", style="cyan", max_width=40)
+        table.add_column("Answer", style="green", max_width=40)
+
+        for ex in result.examples[:5]:
+            table.add_row(
+                ex.query[:40] + "..." if len(ex.query) > 40 else ex.query,
+                ex.answer[:40] + "..." if len(ex.answer) > 40 else ex.answer,
+            )
+
+        console.print(table)
+
+    if preview:
+        console.print("[yellow]Preview mode - no changes applied[/yellow]")
+        return
+
+    # Apply learning
+    async def apply_learning():
+        engine = FlashAIEngine(base_path=base_path)
+        await engine.initialize()
+
+        learning_data = result.to_learning_data()
+        learn_result = await engine.learn(data=learning_data)
+
+        await engine.shutdown()
+        return learn_result
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Learning from data...", total=None)
+        learn_result = asyncio.run(apply_learning())
+
+    console.print(Panel(
+        f"[bold green]Learning complete![/bold green]\n\n"
+        f"Examples processed: {learn_result.get('examples_processed', 0)}\n"
+        f"Average loss: {learn_result.get('average_loss', 0):.4f}",
+        title="Learning Result",
+    ))
+
+
+@main.command()
+@click.pass_context
+def formats(ctx: click.Context) -> None:
+    """Show supported file formats for learning."""
+    from flashai.learning.file_parser import LearningDataParser
+
+    parser = LearningDataParser()
+    supported = parser.get_supported_formats()
+
+    console.print(Panel.fit("[bold]Supported Learning Data Formats[/bold]"))
+
+    for fmt in supported:
+        console.print(f"\n[bold cyan]{fmt['format'].upper()}[/bold cyan] ({', '.join(fmt['extensions'])})")
+        console.print(f"  {fmt['description']}")
+        console.print(f"  [dim]Example: {fmt['example'][:60]}...[/dim]")
+
+
+@main.command()
 @click.option("--output", "-o", type=click.Path(), help="Output file")
 @click.pass_context
 def webhook_setup(ctx: click.Context, output: Optional[str]) -> None:
