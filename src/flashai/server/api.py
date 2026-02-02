@@ -12,6 +12,7 @@ Provides HTTP endpoints for:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -27,6 +28,7 @@ from flashai.core.engine import FlashAIEngine
 from flashai.core.config import FlashAIConfig
 from flashai.github.webhooks import GitHubWebhookHandler
 from flashai.learning.file_parser import LearningDataParser
+from flashai.utils.file_processor import UniversalFileProcessor, OptimizationOptions, FileCategory
 
 
 logger = logging.getLogger(__name__)
@@ -503,6 +505,183 @@ def create_app(
 
         return result
 
+    # File processing endpoints
+    @app.post("/api/v1/files/process")
+    async def process_file(
+        file: UploadFile = File(...),
+        compress: bool = Form(True),
+        extract_text: bool = Form(True),
+        generate_learning_data: bool = Form(True),
+        learn_from_file: bool = Form(False),
+    ):
+        """
+        Process and optimize an uploaded file.
+
+        Supports:
+        - Images: PNG, JPEG, GIF, WebP, SVG, BMP, TIFF
+        - Documents: PDF, DOCX, DOC, TXT, RTF
+        - Data: JSON, CSV, YAML, XML, Excel
+        - Code: Python, JavaScript, TypeScript, Java, C++, Go, Rust, etc.
+        - Archives: ZIP, TAR, GZ
+        - Markup: HTML, Markdown, LaTeX
+        """
+        content = await file.read()
+
+        processor = UniversalFileProcessor()
+        options = OptimizationOptions(
+            compress=compress,
+            extract_text=extract_text,
+            generate_learning_data=generate_learning_data,
+        )
+
+        result = await processor.process_bytes(
+            data=content,
+            filename=file.filename or "upload",
+            options=options,
+        )
+
+        response = result.to_dict()
+
+        # Optionally learn from the file
+        if learn_from_file and result.success:
+            engine = get_engine()
+            if result.metadata.learning_data:
+                learn_result = await engine.learn(data=result.metadata.learning_data)
+                response["learning_result"] = learn_result
+            elif result.metadata.extracted_content:
+                # Create basic learning data from content
+                learn_result = await engine.learn(data={
+                    "examples": [{
+                        "query": f"Content from {file.filename}",
+                        "answer": result.metadata.extracted_content[:5000],
+                    }]
+                })
+                response["learning_result"] = learn_result
+
+        return response
+
+    @app.post("/api/v1/files/batch")
+    async def process_files_batch(
+        files: list[UploadFile] = File(...),
+        compress: bool = Form(True),
+        extract_text: bool = Form(True),
+    ):
+        """Process multiple files in batch."""
+        processor = UniversalFileProcessor()
+        options = OptimizationOptions(
+            compress=compress,
+            extract_text=extract_text,
+        )
+
+        items = []
+        for file in files:
+            content = await file.read()
+            items.append((content, file.filename or "upload"))
+
+        results = await processor.process_batch(items, options)
+
+        return {
+            "processed": len(results),
+            "results": [r.to_dict() for r in results],
+        }
+
+    @app.get("/api/v1/files/supported")
+    async def get_supported_file_types():
+        """Get list of supported file types."""
+        processor = UniversalFileProcessor()
+        extensions = processor.get_supported_extensions()
+
+        # Group by category
+        by_category = {}
+        for ext, category in extensions.items():
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append(ext)
+
+        return {
+            "extensions": extensions,
+            "by_category": by_category,
+            "categories": [c.value for c in FileCategory],
+        }
+
+    @app.post("/api/v1/files/extract-text")
+    async def extract_text_from_file(file: UploadFile = File(...)):
+        """Extract text content from a file."""
+        content = await file.read()
+
+        processor = UniversalFileProcessor()
+        options = OptimizationOptions(
+            compress=False,
+            extract_text=True,
+            generate_learning_data=False,
+        )
+
+        result = await processor.process_bytes(
+            data=content,
+            filename=file.filename or "upload",
+            options=options,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.errors)
+
+        return {
+            "filename": file.filename,
+            "category": result.metadata.category.value,
+            "extracted_text": result.metadata.extracted_content,
+            "metadata": result.metadata.extracted_metadata,
+        }
+
+    @app.post("/api/v1/files/optimize")
+    async def optimize_file(
+        file: UploadFile = File(...),
+        max_image_dimension: int = Form(2048),
+        image_quality: int = Form(85),
+        strip_metadata: bool = Form(False),
+        minify_code: bool = Form(False),
+    ):
+        """Optimize a file (compress, resize images, minify code)."""
+        content = await file.read()
+
+        processor = UniversalFileProcessor()
+        options = OptimizationOptions(
+            compress=True,
+            extract_text=False,
+            generate_learning_data=False,
+            max_image_dimension=max_image_dimension,
+            image_quality=image_quality,
+            strip_metadata=strip_metadata,
+            minify_code=minify_code,
+        )
+
+        result = await processor.process_bytes(
+            data=content,
+            filename=file.filename or "upload",
+            options=options,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.errors)
+
+        # Return optimized file
+        from fastapi.responses import Response
+        return Response(
+            content=result.processed_data,
+            media_type=result.metadata.mime_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{result.metadata.filename}"',
+                "X-Original-Size": str(result.metadata.original_size),
+                "X-Processed-Size": str(result.metadata.processed_size),
+                "X-Optimizations": ",".join(result.metadata.optimization_applied),
+            }
+        )
+
+    # About page
+    @app.get("/about", response_class=HTMLResponse)
+    async def about_page():
+        """Serve the about page."""
+        return get_about_html()
+
     # Web UI route
     @app.get("/", response_class=HTMLResponse)
     async def serve_ui():
@@ -510,6 +689,232 @@ def create_app(
         return get_ui_html()
 
     return app
+
+
+def get_about_html() -> str:
+    """Return the About page HTML."""
+    return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About FlashAI</title>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #22d3ee;
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .logo {
+            width: 80px; height: 80px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px;
+            margin: 0 auto 20px;
+        }
+        h1 { font-size: 48px; margin-bottom: 10px; }
+        .tagline { color: var(--text-muted); font-size: 20px; }
+        .section {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+        h2 {
+            font-size: 24px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h2 span { font-size: 28px; }
+        p { margin-bottom: 16px; color: var(--text-muted); }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+        .feature {
+            background: var(--bg-dark);
+            padding: 20px;
+            border-radius: 12px;
+        }
+        .feature-icon { font-size: 32px; margin-bottom: 12px; }
+        .feature h3 { font-size: 16px; margin-bottom: 8px; }
+        .feature p { font-size: 14px; margin: 0; }
+        .comparison {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .comparison th, .comparison td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        .comparison th {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        .cta {
+            text-align: center;
+            padding: 40px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 14px 32px;
+            background: var(--primary);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 600;
+            margin: 0 10px;
+        }
+        .btn:hover { background: var(--primary-dark); }
+        .btn-secondary {
+            background: transparent;
+            border: 2px solid var(--primary);
+        }
+        .footer {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">⚡</div>
+            <h1>FlashAI</h1>
+            <p class="tagline">Your AI. Your Data. Your Control.</p>
+        </div>
+
+        <div class="section">
+            <h2><span>🎯</span> Vision</h2>
+            <p>FlashAI aims to be the first truly personal, portable AI assistant that you own and control.</p>
+            <p>In a world where AI is increasingly centralized in cloud services, FlashAI offers a different path: an AI that lives on your flash drive, learns from you, adapts to your needs, and goes wherever you go—completely offline if you choose.</p>
+        </div>
+
+        <div class="section">
+            <h2><span>✨</span> What Makes FlashAI Different</h2>
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">💾</div>
+                    <h3>Truly Portable</h3>
+                    <p>Runs entirely from a USB flash drive. No installation, no account, no data leaving your device.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Privacy First</h3>
+                    <p>All processing happens locally. Your data stays encrypted on your device.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🧠</div>
+                    <h3>Energy-Based Reasoning</h3>
+                    <p>Uses energy minimization for logical reasoning—finds correct solutions, not just likely ones.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📈</div>
+                    <h3>Grows With You</h3>
+                    <p>Learns from every interaction. Adapts to your preferences and domain expertise.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📁</div>
+                    <h3>Universal File Support</h3>
+                    <p>Learn from images, PDFs, documents, code, data files, and more.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🤖</div>
+                    <h3>Agentic Framework</h3>
+                    <p>Build autonomous agents with tools, memory, and multi-agent coordination.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2><span>⚡</span> Energy-Based Reasoning</h2>
+            <p>Unlike traditional AI that predicts the "most likely" answer, FlashAI uses Energy-Based Models to find solutions that are verifiably correct.</p>
+            <table class="comparison">
+                <tr>
+                    <th>Traditional LLMs</th>
+                    <th>FlashAI\'s EBM Approach</th>
+                </tr>
+                <tr>
+                    <td>Predicts most likely token</td>
+                    <td>Finds solutions that minimize error</td>
+                </tr>
+                <tr>
+                    <td>Can hallucinate confidently</td>
+                    <td>Provides energy-based confidence scores</td>
+                </tr>
+                <tr>
+                    <td>Difficult to constrain</td>
+                    <td>Enforces explicit constraints</td>
+                </tr>
+                <tr>
+                    <td>Black box reasoning</td>
+                    <td>Transparent reasoning chains</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2><span>🎯</span> Use Cases</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>Personal Assistant</h3>
+                    <p>Answer questions from your documents, remember important info, help with writing.</p>
+                </div>
+                <div class="feature">
+                    <h3>Developer Tool</h3>
+                    <p>Understand codebases, generate suggestions, integrate with GitHub.</p>
+                </div>
+                <div class="feature">
+                    <h3>Learning Companion</h3>
+                    <p>Study with AI questions, get personalized explanations, track progress.</p>
+                </div>
+                <div class="feature">
+                    <h3>Privacy-Sensitive Work</h3>
+                    <p>Confidential documents, healthcare, legal, air-gapped environments.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="cta">
+            <a href="/" class="btn">Get Started</a>
+            <a href="https://github.com/moore70344/FlashAI" class="btn btn-secondary">View on GitHub</a>
+        </div>
+
+        <div class="footer">
+            <p>FlashAI - Portable AI System with Energy-Based Reasoning</p>
+            <p style="margin-top: 10px;">Inspired by <a href="https://logicalintelligence.com/kona-ebms-energy-based-models" style="color: var(--primary);">Logical Intelligence\'s Kona EBMs</a></p>
+        </div>
+    </div>
+</body>
+</html>'''
 
 
 def get_ui_html() -> str:
