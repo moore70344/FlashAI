@@ -12,7 +12,17 @@ FlashAI is a self-contained AI system designed to run from a flash drive, featur
 - **State Management**: Save current state to zip, reset to initial state, or restore from backup
 - **GitHub Integration**: Webhooks for auto-learning from repository changes
 - **REST API**: Full HTTP API for integration with other applications
+- **Web Interface**: Modern, intuitive UI with history, notes, and settings
+- **File Learning**: Upload training data in JSON, CSV, YAML, Markdown, or text formats
+- **Notes & Memory**: Save important information for the AI to remember
+- **Agentic Framework**: Build autonomous agents with tools, memory, and multi-agent coordination
+- **Screen Learning**: Optional screen capture learning (requires user consent)
 - **Cross-Platform**: Works on Windows, macOS, and Linux
+
+## Documentation
+
+- **[Training Guide](docs/TRAINING_GUIDE.md)**: Complete guide to training and customizing your AI
+- **[API Reference](#api-reference)**: REST API endpoints and usage
 
 ## Quick Start
 
@@ -363,6 +373,42 @@ pytest tests/test_ebm.py -v
 When the server is running, visit:
 - Swagger UI: http://localhost:8420/docs
 - ReDoc: http://localhost:8420/redoc
+
+## Agentic Framework
+
+FlashAI includes a framework for building autonomous AI agents:
+
+```python
+from flashai.agents import AgentConfig, AgentCapability
+from flashai.agents.orchestrator import AgentOrchestrator
+
+# Create orchestrator
+orchestrator = AgentOrchestrator(engine=engine)
+
+# Create an agent
+config = AgentConfig(
+    name="research_agent",
+    capabilities=[
+        AgentCapability.REASONING,
+        AgentCapability.TOOL_USE,
+        AgentCapability.WEB_SEARCH,
+    ],
+)
+agent = orchestrator.create_agent(config)
+
+# Run a task
+result = await agent.run("Research AI trends for 2024")
+```
+
+### Features
+
+- **Multiple Agent Types**: Reasoning, tool-using, and custom agents
+- **Built-in Tools**: File I/O, web search, code execution, calculator
+- **Agent Memory**: Short-term and long-term memory systems
+- **Multi-Agent Coordination**: Run tasks in parallel or sequence
+- **Custom Tools**: Easy framework for adding new capabilities
+
+See the [Training Guide](docs/TRAINING_GUIDE.md#agentic-capabilities) for details.
 
 ## License
 
