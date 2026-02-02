@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Create portable package
+        run: |
+          mkdir -p portable/FlashAI
+          cp -r src/flashai portable/FlashAI/
+          cp -r config portable/FlashAI/
+          cp -r scripts portable/FlashAI/
+          cp pyproject.toml portable/FlashAI/
+          cp README.md portable/FlashAI/
+          mkdir -p portable/FlashAI/data/{user_profiles,checkpoints,exports,logs}
+          mkdir -p portable/FlashAI/models
+          touch portable/FlashAI/.flashai_portable
+          touch portable/FlashAI/.flashai_root
+          cd portable && zip -r ../FlashAI-portable-${{ github.ref_name }}.zip FlashAI
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/*
+            FlashAI-portable-${{ github.ref_name }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: release
+    if: "!contains(github.ref_name, '-')"  # Skip pre-releases
+    environment:
+      name: pypi
+      url: https://pypi.org/p/flashai
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

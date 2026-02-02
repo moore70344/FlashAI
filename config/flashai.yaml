@@ -1,0 +1,86 @@
+# FlashAI Configuration
+# ====================
+# This file configures the FlashAI portable AI system.
+# Copy this file and customize for your deployment.
+
+# System Identification
+system_id: ""  # Auto-generated on first run
+system_name: "FlashAI"
+
+# Directory Paths (relative to installation root)
+data_dir: "data"
+models_dir: "models"
+config_dir: "config"
+
+# Energy-Based Model Configuration
+ebm:
+  # Model Architecture
+  input_dim: 512           # Input embedding dimension
+  hidden_dims: [256, 128, 64]  # Hidden layer dimensions
+  energy_dim: 32           # Energy function output dimension
+
+  # Training Parameters
+  learning_rate: 0.001     # Learning rate for optimization
+  energy_margin: 1.0       # Margin for contrastive energy loss
+  noise_scale: 0.1         # Scale for noise contrastive estimation
+
+  # Inference Parameters
+  inference_steps: 10      # Energy minimization steps during inference
+  step_size: 0.01          # Step size for gradient descent
+  temperature: 1.0         # Sampling temperature
+
+  # Reasoning Parameters
+  max_reasoning_depth: 5   # Maximum steps in reasoning chain
+  constraint_weight: 0.5   # Weight for constraint satisfaction energy
+  coherence_threshold: 0.7 # Threshold for acceptable coherence
+
+# User Adaptation Configuration
+user_adaptation:
+  # Profile Settings
+  max_interaction_history: 1000  # Maximum interactions to store
+  preference_decay: 0.95         # Decay rate for old preferences
+
+  # Learning Parameters
+  adaptation_rate: 0.1           # Rate of adaptation to user patterns
+  min_samples_for_adaptation: 5  # Minimum samples before adapting
+
+  # Privacy Settings
+  encrypt_profile: true          # Encrypt user profile data
+  anonymize_logs: true           # Anonymize interaction logs
+
+# GitHub Integration Configuration
+github:
+  # Repository Settings (fill in for your repo)
+  repo_owner: ""           # GitHub username or organization
+  repo_name: ""            # Repository name
+  default_branch: "main"   # Default branch name
+
+  # Webhook Settings
+  webhook_secret: ""       # Secret for webhook verification
+  webhook_events:          # Events to process
+    - push
+    - pull_request
+    - issues
+    - issue_comment
+
+  # API Settings
+  api_base_url: "https://api.github.com"
+  api_timeout: 30          # Request timeout in seconds
+
+  # Auto-Learning
+  enable_auto_learn: true  # Learn from repository changes
+  enable_issue_responses: false  # Auto-respond to issues (use carefully)
+
+# Server Configuration
+server:
+  host: "127.0.0.1"        # Server host (use 0.0.0.0 for external access)
+  port: 8420               # Server port
+  workers: 1               # Number of worker processes
+  reload: false            # Auto-reload for development
+  cors_origins:            # Allowed CORS origins
+    - "*"
+
+# Runtime Settings
+device: "auto"             # Compute device: auto, cpu, cuda, mps
+log_level: "INFO"          # Logging level: DEBUG, INFO, WARNING, ERROR
+enable_telemetry: false    # Usage telemetry (disabled by default)

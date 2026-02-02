@@ -1,0 +1,66 @@
+# FlashAI Models Registry
+# =======================
+# Registry of available models and their configurations.
+# FlashAI can download and use these models based on requirements.
+
+models:
+  # Default EBM Model
+  flashai-ebm-base:
+    name: "FlashAI EBM Base"
+    description: "Base Energy-Based Reasoning Model"
+    version: "1.0.0"
+    type: "ebm"
+    size_mb: 50
+    config:
+      input_dim: 512
+      hidden_dims: [256, 128, 64]
+      energy_dim: 32
+    compatible_devices: ["cpu", "cuda", "mps"]
+    min_python: "3.9"
+
+  # Compact Model for Portable Use
+  flashai-ebm-compact:
+    name: "FlashAI EBM Compact"
+    description: "Lightweight model optimized for portable devices"
+    version: "1.0.0"
+    type: "ebm"
+    size_mb: 15
+    config:
+      input_dim: 256
+      hidden_dims: [128, 64]
+      energy_dim: 16
+    compatible_devices: ["cpu"]
+    min_python: "3.9"
+
+  # Large Model for Advanced Reasoning
+  flashai-ebm-large:
+    name: "FlashAI EBM Large"
+    description: "Enhanced model for complex reasoning tasks"
+    version: "1.0.0"
+    type: "ebm"
+    size_mb: 200
+    config:
+      input_dim: 1024
+      hidden_dims: [512, 256, 128]
+      energy_dim: 64
+    compatible_devices: ["cuda", "mps"]
+    min_python: "3.9"
+    requires_gpu: true
+
+# Model Sources
+sources:
+  default:
+    type: "github_release"
+    repo: "moore70344/FlashAI"
+    asset_pattern: "flashai-model-{model_id}-{version}.pt"
+
+  huggingface:
+    type: "huggingface"
+    repo: "flashai/models"
+    enabled: false
+
+# Download Settings
+download:
+  cache_dir: "models/cache"
+  verify_checksums: true
+  auto_update: false

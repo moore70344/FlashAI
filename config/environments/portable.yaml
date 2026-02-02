@@ -1,0 +1,35 @@
+# FlashAI Portable Environment Configuration
+# ===========================================
+# Optimized for running from flash drive with limited resources.
+
+system_name: "FlashAI-Portable"
+
+# Local-only server
+server:
+  host: "127.0.0.1"
+  port: 8420
+  workers: 1
+  reload: false
+  cors_origins:
+    - "http://localhost:*"
+    - "http://127.0.0.1:*"
+
+# Moderate logging
+log_level: "INFO"
+
+# Reduced model size for portability
+ebm:
+  input_dim: 256
+  hidden_dims: [128, 64]
+  inference_steps: 5
+  max_reasoning_depth: 3
+
+# Compact data storage
+user_adaptation:
+  encrypt_profile: true
+  anonymize_logs: true
+  max_interaction_history: 500
+  preference_decay: 0.9
+
+# CPU only (portable devices often lack GPU)
+device: "cpu"

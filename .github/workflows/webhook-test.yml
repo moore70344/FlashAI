@@ -1,0 +1,58 @@
+name: Webhook Test
+
+on:
+  repository_dispatch:
+    types: [flashai-test]
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'basic'
+        type: choice
+        options:
+          - basic
+          - integration
+          - full
+
+jobs:
+  webhook-test:
+    name: Test FlashAI Webhook Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FlashAI
+        run: pip install -e ".[dev]"
+
+      - name: Run webhook tests
+        run: |
+          echo "Testing FlashAI webhook integration..."
+          echo "Event type: ${{ github.event_name }}"
+          echo "Test type: ${{ github.event.inputs.test_type || 'triggered' }}"
+
+          # Run webhook handler tests
+          python -c "
+          from flashai.github.webhooks import GitHubWebhookHandler
+          from flashai.core.config import GitHubConfig
+
+          config = GitHubConfig(
+              repo_owner='test',
+              repo_name='test',
+              webhook_secret='test-secret',
+          )
+          handler = GitHubWebhookHandler(config)
+          print('Webhook handler initialized successfully')
+          print(f'Registered events: {list(handler._handlers.keys())}')
+          "
+
+      - name: Notify on dispatch
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          echo "Received repository_dispatch event"
+          echo "Client payload: ${{ toJson(github.event.client_payload) }}"

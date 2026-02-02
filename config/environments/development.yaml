@@ -1,0 +1,30 @@
+# FlashAI Development Environment Configuration
+# =============================================
+# Use this configuration for local development and testing.
+
+system_name: "FlashAI-Dev"
+
+# Enable development features
+server:
+  host: "127.0.0.1"
+  port: 8420
+  reload: true
+  cors_origins:
+    - "*"
+
+# Verbose logging
+log_level: "DEBUG"
+
+# Faster iteration settings
+ebm:
+  inference_steps: 5
+  max_reasoning_depth: 3
+
+# Disable encryption for easier debugging
+user_adaptation:
+  encrypt_profile: false
+  anonymize_logs: false
+  max_interaction_history: 100
+
+# Development device
+device: "cpu"

@@ -1,0 +1,33 @@
+# FlashAI Production Environment Configuration
+# =============================================
+# Use this configuration for production deployments.
+
+system_name: "FlashAI-Production"
+
+# Production server settings
+server:
+  host: "0.0.0.0"
+  port: 8420
+  workers: 4
+  reload: false
+  cors_origins: []  # Specify allowed origins explicitly
+
+# Production logging
+log_level: "WARNING"
+
+# Full model capacity
+ebm:
+  inference_steps: 15
+  max_reasoning_depth: 7
+
+# Enhanced privacy
+user_adaptation:
+  encrypt_profile: true
+  anonymize_logs: true
+  max_interaction_history: 5000
+
+# Auto-detect GPU
+device: "auto"
+
+# Disable telemetry
+enable_telemetry: false
